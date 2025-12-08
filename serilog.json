@@ -1,0 +1,20 @@
+﻿{
+  "Serilog": {
+    "MinimumLevel": {
+      "Default": "Information"
+    },
+    "WriteTo": [
+      {
+        "Name": "File",
+        "Args": {
+          "path": "logsApp/app.log",
+          "rollingInterval": "Day",
+          "outputTemplate": "[{Timestamp:HH:mm:ss} {Level}] {Message}{NewLine}{Exception}"
+        }
+      },
+      {
+        "Name": "Console"
+      }
+    ]
+  }
+}
