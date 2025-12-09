@@ -36,10 +36,10 @@ public class WebhookController : ControllerBase
             if (retorno.Success != true)
             {
                 _logger.LogError($"Erro no processamento: {retorno}");
-                return Ok(new { Message = "Não foi possível inserir", retorno });
+                return Conflict(new { Message = "Não foi possível inserir", retorno });
             }
 
-            return Ok(retorno);
+            return StatusCode(201,retorno);
         }
         catch (Exception ex)
         {

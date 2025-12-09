@@ -40,11 +40,12 @@ public class RepositoryBlingWebhook
                 Success = true,
                 Message = "Procedure executada com sucesso",
                 ProcessedAt = DateTime.UtcNow.ToString("o"),
-                EventId = payload.EventId
+                EventId = payload.EventId,                
             };
         }
         catch (SqlException ex) when (ex.Number == 2627 || ex.Number == 2601)
         {
+            Console.Write(ex);
             // erro de chave duplicada
             _logger.LogError($"Erro duplicado: {ex.Message}");
 
@@ -53,7 +54,7 @@ public class RepositoryBlingWebhook
                 Success = false,
                 Message = "Registro duplicado, não foi possível inserir evento",
                 ProcessedAt = DateTime.UtcNow.ToString("o"),
-                EventId = payload.EventId
+                EventId = payload.EventId                
             };
         }
         catch (SqlException ex)
@@ -65,7 +66,7 @@ public class RepositoryBlingWebhook
                 Success = false,
                 Message = "Erro inesperado ao salvar webhook.",
                 ProcessedAt = DateTime.UtcNow.ToString("o"),
-                EventId = "Error"
+                EventId = "Error"                
             };
         }
     }

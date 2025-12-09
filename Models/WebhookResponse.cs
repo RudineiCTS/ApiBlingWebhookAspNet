@@ -4,4 +4,5 @@
     public string Message { get; set; } = "";
     public string ProcessedAt { get; set; } = "";
     public string? EventId { get; set; }
+    public int? StatusCode { get; set; }
 }
