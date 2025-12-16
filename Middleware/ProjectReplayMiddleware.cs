@@ -1,98 +1,80 @@
-﻿using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using Newtonsoft.Json.Linq; // instalar package Newtonsoft.Json
-using System;
-using System.IO;
+﻿using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
-using System.Security.Cryptography;
-
+using Serilog;
+using Newtonsoft.Json.Linq;
+using ILogger = Serilog.ILogger;
 
 public class ProtectReplayMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly ILogger<ProtectReplayMiddleware> _logger;
+    private readonly ILogger _logger;
     private readonly string _blingSecret;
 
     public ProtectReplayMiddleware(
         RequestDelegate next,
-        ILogger<ProtectReplayMiddleware> logger,
         IConfiguration configuration)
     {
         _next = next;
-        _logger = logger;
-        _blingSecret = configuration["BLING_CLIENT_SECRET"]!;
+        _logger = Log.ForContext<ProtectReplayMiddleware>();
+        _blingSecret = configuration["BLING_CLIENT_SECRET"]
+            ?? throw new InvalidOperationException("BLING_CLIENT_SECRET não configurado");
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Permitir leitura múltipla do body
-        context.Request.EnableBuffering();
+        // Body já foi lido pelo RequestLoggingMiddleware
+        context.Request.Body.Seek(0, SeekOrigin.Begin);
 
-        using var reader = new MemoryStream();
-        await context.Request.Body.CopyToAsync(reader);
-        var rawBytes = reader.ToArray();
-
-        context.Request.Body.Position = 0;
+        using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
+        var rawBody = await reader.ReadToEndAsync();
+        context.Request.Body.Seek(0, SeekOrigin.Begin);
 
         var signature = context.Request.Headers["X-Bling-Signature-256"].ToString();
 
-        _logger.LogInformation($"Signature recebida: {signature}");
-        _logger.LogInformation($"Raw body: {Encoding.UTF8.GetString(rawBytes)}");
-
-        // 1. VALIDAR HASH
-        bool isValid = VerifyBlingSignature(rawBytes, signature, _blingSecret);
-        if (!isValid)
+        if (!VerifyBlingSignature(rawBody, signature))
         {
-            context.Response.StatusCode = 401;
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Assinatura inválida");
             return;
         }
 
-        // 2. PARSE DO JSON
         JObject jsonBody;
         try
         {
-            jsonBody = JObject.Parse(Encoding.UTF8.GetString(rawBytes));
+            jsonBody = JObject.Parse(rawBody);
         }
         catch
         {
-            context.Response.StatusCode = 400;
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsync("Body inválido");
             return;
         }
 
-        // 3. EXTRAI ID ÚNICO
         var id = jsonBody["id"]?.ToString() ?? jsonBody["eventId"]?.ToString();
-        if (string.IsNullOrEmpty(id))
+        if (string.IsNullOrWhiteSpace(id))
         {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Nenhum ID único encontrado.");
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Nenhum ID único encontrado");
             return;
         }
 
-        // 4. INJETAR NO CONTROLLER (HttpContext.Items)
         context.Items["jsonBody"] = jsonBody;
 
-        // seguir adiante
         await _next(context);
     }
 
-    private bool VerifyBlingSignature(byte[] rawBody, string? headerSignature, string clientSecret)
+    private bool VerifyBlingSignature(string rawBody, string? headerSignature)
     {
         if (string.IsNullOrWhiteSpace(headerSignature) || !headerSignature.StartsWith("sha256="))
             return false;
 
-        // remove o prefixo "sha256="
-        var receivedHash = headerSignature.Replace("sha256=", "");
+        var receivedHash = headerSignature["sha256=".Length..];
 
-        // gerar hash HMAC SHA256 com a mesma lógica do Node
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(clientSecret));
-        var hashBytes = hmac.ComputeHash(rawBody);
-        var generatedHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_blingSecret));
+        var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(rawBody));
 
-        // comparar hash recebido com hash gerado
-        return generatedHash == receivedHash;
+        var receivedBytes = Convert.FromHexString(receivedHash);
+
+        return CryptographicOperations.FixedTimeEquals(computedHash, receivedBytes);
     }
 }

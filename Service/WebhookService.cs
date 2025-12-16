@@ -1,36 +1,50 @@
-﻿using Microsoft.Extensions.Logging;
-using Newtonsoft.Json.Linq;
-using System;
-using System.Threading.Tasks;
+﻿using Newtonsoft.Json.Linq;
+using Serilog;
+using ILogger = Serilog.ILogger;
 
 public class WebhookService
 {
-    private readonly ILogger<WebhookService> _logger;
-    private readonly RepositoryBlingWebhook _sqlService;
+    private readonly ILogger _logger;
+    private readonly RepositoryBlingWebhook _repository;
 
-    public WebhookService(ILogger<WebhookService> logger, RepositoryBlingWebhook sqlService)
+    public WebhookService(RepositoryBlingWebhook repository)
     {
-        _logger = logger;
-        _sqlService = sqlService;
+        _logger = Log.ForContext<WebhookService>();
+        _repository = repository;
     }
 
     public async Task<WebhookResponse> ProcessWebhook(JObject payload)
     {
+        var eventId = payload["eventId"]?.ToString();
+        var eventName = payload["event"]?.ToString();
+
         try
         {
             var data = new WebhookPayload
             {
-                EventId = payload["eventId"]?.ToString(),
-                Event = payload["event"]?.ToString(),
+                EventId = eventId,
+                Event = eventName,
                 RawJson = payload
             };
 
-            return await _sqlService.SalvarEvento(data);
+            _logger.Information(
+                "Processando webhook. Event={Event} EventId={EventId}",
+                eventName,
+                eventId
+            );
+
+            return await _repository.SalvarEvento(data);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro no processamento do webhook");
-            throw new Exception("Falhou o processamento do webhook");
+            _logger.Error(
+                ex,
+                "Erro ao processar webhook. Event={Event} EventId={EventId}",
+                eventName,
+                eventId
+            );
+
+            throw; // 🔥 mantém stack trace
         }
     }
 }

@@ -1,14 +1,22 @@
+﻿using Infrastructure.Logging;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1) CONFIGURA��O DO SERILOG
-builder.Host.UseSerilog((context, logConfig) =>
+// =======================================
+// 1) CONFIGURAÇÃO DO SERILOG
+// =======================================
+builder.Host.UseSerilog((context, services, logConfig) =>
 {
-    logConfig.ReadFrom.Configuration(context.Configuration);
+    logConfig
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext();
 });
 
+// =======================================
 // 2) SERVICES
+// =======================================
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -17,28 +25,42 @@ builder.Services.AddControllers()
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// DI
 builder.Services.AddScoped<WebhookService>();
 builder.Services.AddScoped<RepositoryBlingWebhook>();
 
 var app = builder.Build();
 
-// 3) SWAGGER (APENAS EM DEV)
+// =======================================
+// 3) SWAGGER (SOMENTE DEV)
+// =======================================
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-// 4) HTTPS REDIRECTION (IMPORTANTE!)
+// =======================================
+// 4) PIPELINE HTTP
+// =======================================
+
+// Necessário para IIS quando há proxy / SSL offloading
+app.UseForwardedHeaders();
+
+// HTTPS
 app.UseHttpsRedirection();
 
-// 5) LOG DAS REQUISI��ES
+// Log básico (status, tempo, método)
 app.UseSerilogRequestLogging();
 
-// 6) AUTHORIZATION
+// 🔥 Middleware de LOG COMPLETO (body + erro)
+app.UseMiddleware<RequestLoggingMiddleware>();
+
+// Authorization
 app.UseAuthorization();
 
-// 7) SEU MIDDLEWARE CUSTOMIZADO
+// Middleware de segurança
 app.UseWhen(
     context =>
         !context.Request.Path.StartsWithSegments("/swagger")
@@ -49,7 +71,7 @@ app.UseWhen(
     }
 );
 
-// 8) CONTROLLERS
+// Controllers
 app.MapControllers();
 
 app.Run();
